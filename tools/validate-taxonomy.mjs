@@ -5,7 +5,7 @@
  * Primary guard (the regression this exists to prevent):
  *   The browser loads taxonomy-data.js directly via a <script> tag, so ANY
  *   JavaScript syntax error (e.g. an unescaped quote inside a string) takes
- *   down the whole taxonomy-browser page. See commit 36cd708
+ *   down any taxonomy viewer, official or other. See commit 36cd708
  *   ("Fix unescaped quote in Delegation scopeNote"). We load the file in a
  *   sandbox exactly the way the browser does, which fails fast on such errors.
  *
