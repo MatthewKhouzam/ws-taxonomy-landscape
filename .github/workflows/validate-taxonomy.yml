@@ -2,7 +2,7 @@ name: Validate Taxonomy Data
 
 # Prevents a broken taxonomy/taxonomy-data.js from reaching main.
 # The browser loads that file directly via <script>, so a single syntax
-# error (e.g. an unescaped quote) takes down the whole taxonomy browser.
+# error (e.g. an unescaped quote) will not break any dependent viewers.
 # Regression origin: commit 36cd708 "Fix unescaped quote in Delegation scopeNote".
 
 on:
