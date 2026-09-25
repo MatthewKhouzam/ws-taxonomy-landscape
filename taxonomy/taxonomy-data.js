@@ -273,16 +273,6 @@ window.AAIF_TAXONOMY = [
     workgroups: ['Agentic Commerce']
   },
   {
-    term: 'Risk signal',
-    category: '',
-    aliases: [],
-    broaderTerm: null,
-    definition: 'Definition pending — term accepted; definition under working group discussion.',
-    relatedTerms: [],
-    contrastsWith: [],
-    workgroups: ['Agentic Commerce']
-  },
-  {
     term: 'Agentic commerce',
     category: '',
     aliases: [],
@@ -294,16 +284,6 @@ window.AAIF_TAXONOMY = [
   },
   {
     term: 'Agentic commerce protocol',
-    category: '',
-    aliases: [],
-    broaderTerm: null,
-    definition: 'Definition pending — term accepted; definition under working group discussion.',
-    relatedTerms: [],
-    contrastsWith: [],
-    workgroups: ['Agentic Commerce']
-  },
-  {
-    term: 'Capability negotiation',
     category: '',
     aliases: [],
     broaderTerm: null,
@@ -354,26 +334,6 @@ window.AAIF_TAXONOMY = [
   },
   {
     term: 'Agent-completed transaction',
-    category: '',
-    aliases: [],
-    broaderTerm: null,
-    definition: 'Definition pending — term accepted; definition under working group discussion.',
-    relatedTerms: [],
-    contrastsWith: [],
-    workgroups: ['Agentic Commerce']
-  },
-  {
-    term: 'Human-present transaction',
-    category: '',
-    aliases: [],
-    broaderTerm: null,
-    definition: 'Definition pending — term accepted; definition under working group discussion.',
-    relatedTerms: [],
-    contrastsWith: [],
-    workgroups: ['Agentic Commerce']
-  },
-  {
-    term: 'Human-not-present transaction',
     category: '',
     aliases: [],
     broaderTerm: null,
