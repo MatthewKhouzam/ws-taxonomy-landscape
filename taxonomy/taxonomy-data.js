@@ -191,7 +191,7 @@ window.AAIF_TAXONOMY = [
     aliases: ['Agent discovery'],
     broaderTerm: null,
     definition: 'The process by which a Workflow identifies candidate participants, capabilities, or tools that may be relevant to performing an Activity or advancing the Workflow toward its goal.',
-    scopeNote: 'Discovery may use descriptions of the capabilities, registries, metadata, configuration, policies, or other mechanisms. It identifies candidate options and related  information, but does not by itself imply selection, authorization, trust, or invocation.',
+    scopeNote: 'Discovery may use descriptions of the capabilities, registries, metadata, configuration, policies, or other mechanisms. It identifies candidate options and related information, but does not by itself imply selection, authorization, trust, or invocation.',
     relatedTerms: [],
     contrastsWith: [],
     workgroups: ['Workflows & Process Integration', 'Identity & Trust']
@@ -214,7 +214,7 @@ window.AAIF_TAXONOMY = [
     broaderTerm: null,
     definition: 'The property by which an Execution produces the same behavior given the same inputs and state.',
     scopeNote: 'Determinism may apply to an Execution as a whole or to a specific layer, component, or decision point within it. Deterministic behavior at one level does not imply determinism at every other level. In workflow systems, for example, Control Flow may be deterministic while an individual Activity may produce variable outputs, particularly when LLM-driven. This definition does not prescribe how Determinism is measured, scored or evaluated.',
-    relatedTerms: ['Deterministic', 'Non-deterministic'],
+    relatedTerms: [],
     contrastsWith: [],
     workgroups: ['Workflows & Process Integration', 'Observability & Traceability', 'Accuracy & Reliability']
   },
@@ -229,20 +229,20 @@ window.AAIF_TAXONOMY = [
     workgroups: ['Workflows & Process Integration', 'Observability & Traceability']
   },
   {
-    term: 'Agentic Lifecycle',
+    term: 'Agentic lifecycle',
     category: '',
-    aliases: ['Lifecycle'],
+    aliases: [],
     broaderTerm: null,
     definition: 'The stages through which an agentic system progresses from definition and configuration through operation, evaluation, adaptation and retirement.',
     scopeNote: 'Agentic Lifecycle refers to the lifecycle of the overall agentic system, rather than a single Agent or Workflow Execution. Its stages may repeat or occur in different orders.',
-    relatedTerms: ["Agentic loop"],
+    relatedTerms: [],
     contrastsWith: [],
     workgroups: ['Workflows & Process Integration', 'Observability & Traceability']
   },
   {
     term: 'Activity',
     category: '',
-    aliases: ['Task', 'Action'],
+    aliases: [],
     broaderTerm: null,
     definition: ' A bounded unit of work performed as part of a Workflow, with defined or identifiable inputs and outputs.',
     scopeNote: 'An Activity may be performed by an agent, human, tool, service, or other participant. It may consist of one or more lower-level steps or actions. Terms such as Task, Step, and Action may represent finer-grained or framework-specific units of work.',
@@ -251,9 +251,9 @@ window.AAIF_TAXONOMY = [
     workgroups: ['Workflows & Process Integration']
   },
   {
-    term: 'Agentic Workflow',
+    term: 'Agentic workflow',
     category: '',
-    aliases: ['Workflow'],
+    aliases: [],
     broaderTerm: null,
     definition: 'A progression of Activities toward a goal in which one or more Agents participate in determining, sequencing, or performing work.',
     scopeNote: 'Agent participation may occur in only part of the Workflow and does not require every Activity to be performed by an Agent. An Agentic Workflow may also include humans, tools, services, or other participants.',
