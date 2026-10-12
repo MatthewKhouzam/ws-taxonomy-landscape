@@ -341,11 +341,11 @@ window.AAIF_TAXONOMY = [
   {
     term: 'Accountability',
     category: '',
-    aliases: ['Responsibility', 'Traceability'],
+    aliases: ['Responsibility'],
     broaderTerm: null,
     definition: 'The processes and mechanisms ensuring that AI agents operate within defined ethical, legal, and operational boundaries with traceability for their actions and decisions.',
     scopeNote: 'Encompasses logging, auditing, and enforcement of agent behaviors to enable responsibility attribution. Accountability down the line is knowing who is responsible for the actions of an agent. E.g. if an agent has a credit card, who is accountable when it makes a purchase.',
-    relatedTerms: ['Governance', 'Trust', 'Attestation'],
+    relatedTerms: ['Governance', 'Trust', 'Attestation', 'Traceability'],
     contrastsWith: [],
     workgroups: ['Accuracy & Reliability', 'Agentic Commerce', 'Governance, Risk & Regulatory Alignment', 'Identity & Trust', 'Observability & Traceability', 'Security & Privacy']
   },
