@@ -155,6 +155,13 @@
           </div>
         </div>
 
+        <div class="wizard-ai-bar" id="wiz-ai-bar">
+          <button type="button" class="wizard-ai-btn" id="wiz-ai-fill-btn" title="Draft the fields for this term with the selected model">✨ Fill with AI</button>
+          <select id="wiz-ai-model" class="wizard-ai-model" title="Choose which model drafts the fields"><option value="">Loading models…</option></select>
+          <span class="wizard-ai-text">Drafts the <strong>definition</strong>, <strong>scope note</strong>, <strong>aliases</strong>, and suggests <strong>related terms</strong>, <strong>contrasts</strong> and <strong>working groups</strong> (only existing terms/groups are used). Any model exposed by Puter is selectable. Always review — you own every word.</span>
+          <span class="wizard-ai-status checking" id="wiz-ai-status">Checking…</span>
+        </div>
+
         <div class="wizard-row">
           <label for="wiz-definition">Definition</label>
           <div class="wizard-hint">One sentence. Leave blank to keep the "pending" placeholder.</div>
@@ -254,6 +261,9 @@
   <!-- JavaScript Modularity Layer -->
   <script src="taxonomy-data.js"></script>
   <script src="app.js"></script>
+  <!-- Puter SDK: free, key-less access to AI models (no backend, no API key).
+       The wizard's "Fill with AI" lists every model Puter exposes. -->
+  <script src="https://js.puter.com/v2/"></script>
   <script src="wizard.js"></script>
 </body>
 

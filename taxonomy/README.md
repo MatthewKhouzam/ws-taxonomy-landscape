@@ -17,11 +17,28 @@ The **Browse** experience and the **Propose / Edit Term** wizard both live in
     transmitted**.
   - **Download `create-pr.sh`** — a fully automated script that makes the
     branch, surgical commit, push, and PR for you.
+- **Fill with AI** — optionally draft the definition, scope note, aliases,
+  related terms, contrasts, and working groups for a term. Always review before
+  submitting.
 
-> **No access tokens, no external AI.** The wizard is deliberately vendor-neutral
-> and credential-free for the official AAIF GitHub Pages origin: there is no
-> GitHub Personal Access Token field and no third-party AI SDK. Everything runs
-> client-side against GitHub's own web flow.
+## AI assist (Fill with AI)
+
+The Propose form has a **✨ Fill with AI** button backed by the key-less
+[Puter](https://puter.com) SDK — no backend and no API key. The model dropdown
+lists **every model Puter exposes**, in Puter's own order; no single vendor or
+model is privileged or defaulted — pick whichever you like. Related/contrasting
+suggestions are constrained to **existing taxonomy terms** and working groups to
+the **fixed list** (the prompt is given both lists and told to copy verbatim;
+anything the model invents is validated out and reported). Aliases the model
+proposes that collide with an existing primary term are dropped (see #78). The
+UI follows the explorer's own design tokens; it imports no foreign styling.
+
+Authorship provenance is tracked: the wizard measures how much of the final
+entry survived from the AI draft (character-level for text, set overlap for
+lists) versus what you edited, and writes that ratio — plus the model used —
+into the commit message and PR body. If an entry is **100% AI-drafted and
+unedited**, the wizard asks you to confirm you reviewed it before generating the
+PR, so no unreviewed AI text ships silently.
 
 ## Validation guardrails
 

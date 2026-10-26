@@ -6,10 +6,12 @@
  *   - Backend-free: it reads the taxonomy from the already-loaded
  *     window.AAIF_TAXONOMY global (same-origin taxonomy-data.js) — no fetch,
  *     no CORS, no raw.githubusercontent.com dependency.
- *   - Credential-free & vendor-neutral: NO GitHub Personal Access Token input
- *     and NO external AI SDK (no js.puter.com / Grok). Submission uses only
- *     GitHub's own token-less in-browser web flow, or a downloadable
- *     create-pr.sh script that runs locally.
+ *   - Credential-free submission: NO GitHub Personal Access Token input. The
+ *     PR is opened via GitHub's own token-less in-browser web flow, or a
+ *     downloadable create-pr.sh script that runs locally.
+ *   - Optional AI assist via the key-less Puter SDK. It is model-AGNOSTIC: the
+ *     dropdown lists EVERY model Puter exposes (no single vendor/model such as
+ *     Grok is privileged or defaulted). The human reviews before submitting.
  *
  * Validation guardrails preserved from the prototype:
  *   - Aliases may NOT collide with an existing primary term (#78).
@@ -68,6 +70,9 @@
     wireTermField();
     $("wiz-definition").addEventListener("input", checkSentences);
     $("wiz-gen-btn").addEventListener("click", generate);
+
+    // AI assist (any model exposed by the Puter SDK).
+    AI.init();
   }
 
   // ---------- tab integration with the existing explorer ----------
@@ -286,6 +291,7 @@
     fillTags("contrastsWith", t.contrastsWith || []);
     const set = new Set(t.workgroups || []);
     document.querySelectorAll("#wiz-wg-list input").forEach((cb) => (cb.checked = set.has(cb.value)));
+    AI.resetBaseline();
     checkSentences();
   }
   function fillTags(name, values) {
@@ -306,9 +312,21 @@
   function commitSubject(p, exists) {
     return (exists ? "Update" : "Define") + " taxonomy term: " + p.term;
   }
-  function prBody(p, exists) {
+  // Authorship provenance: how much of the final entry survived from the AI
+  // draft (if any) versus human editing. Recorded in the commit body and PR.
+  function provenanceLine(attribution) {
+    const attr = attribution || { origin: "manual", defPct: 0, scopePct: null, totalHumanPct: 100 };
+    if (attr.origin === "manual") return "Authorship: 100% human-written (no AI draft used).";
+    const scope = attr.scopePct == null ? "n/a" : attr.scopePct + "% AI";
+    return (
+      "Authorship (AI-drafted vs. human): definition " + attr.defPct + "% AI, scope " +
+      scope + ", total " + attr.totalHumanPct + "% human across the patch" +
+      (attr.model ? " (model: " + attr.model + ")" : "") + "."
+    );
+  }
+  function prBody(p, exists, attribution) {
     const action = exists ? "update" : "add";
-    return `Proposed via the Taxonomy Term Wizard (${action}). Touches only ${DATA_FILE}.`;
+    return `Proposed via the Taxonomy Term Wizard (${action}). Touches only ${DATA_FILE}.\n\n${provenanceLine(attribution)}`;
   }
 
   // Splice the generated entry into the raw data file text in the browser,
@@ -375,11 +393,12 @@
     return lines.join("\n");
   }
 
-  function buildScript(p, exists) {
+  function buildScript(p, exists, attribution) {
     const branch = "taxonomy/define-" + slug(p.term);
     const entry = jsEntry(p);
     const action = exists ? "update" : "add";
     const subject = commitSubject(p, exists);
+    const commitBody = provenanceLine(attribution);
     const DELIM = "TAXONOMY_ENTRY_EOF";
 
     const py = [
@@ -450,12 +469,16 @@ ${DELIM}_PY
 
 # --- commit ------------------------------------------------------------------
 git add "$FILE"
-git commit -s -m "${subject}" -m "Proposed via the Taxonomy Term Wizard (${action}). Touches only ${DATA_FILE}."
+git commit -s -m "${subject}" -m "Proposed via the Taxonomy Term Wizard (${action}). Touches only ${DATA_FILE}.
+
+${commitBody}"
 
 # --- push & PR ---------------------------------------------------------------
 git push -u origin "$BRANCH"
 
-PR_BODY="Proposed via the Taxonomy Term Wizard (${action}). Touches only ${DATA_FILE}."
+PR_BODY="Proposed via the Taxonomy Term Wizard (${action}). Touches only ${DATA_FILE}.
+
+${commitBody}"
 if command -v gh >/dev/null; then
   gh pr create --repo "$REPO" --base "$BASE" --head "$BRANCH" \\
     --title "${subject}" --body "$PR_BODY"
@@ -474,31 +497,58 @@ echo "Done."
     const p = collectPayload();
     if (!p.term) { banner("err", "Term is required."); return; }
     const exists = !!STATE.byName[p.term.toLowerCase()];
+    const attribution = AI.attribution(p);
 
-    const script = buildScript(p, exists);
+    // Guard: a 100% AI-drafted, entirely unedited entry must not ship
+    // unreviewed. Ask the human to confirm they reviewed it first.
+    if (attribution && attribution.origin === "ai" && !generate._aiConfirmed) {
+      const ok = window.confirm(
+        "This entry is 100% AI-drafted" + (attribution.model ? " (" + attribution.model + ")" : "") +
+        " and has not been edited.\n\nYou are the author of record. Have you reviewed it and do you " +
+        "confirm it is accurate and vendor-neutral?\n\nClick OK to confirm and generate the PR, or Cancel to edit it first."
+      );
+      if (!ok) {
+        banner("warn", "Review the AI-drafted entry and edit as needed, then generate again.");
+        $("wiz-definition").focus();
+        return;
+      }
+      generate._aiConfirmed = true;
+    } else if (!attribution || attribution.origin !== "ai") {
+      generate._aiConfirmed = false;
+    }
+
+    const script = buildScript(p, exists, attribution);
     const entry = jsEntry(p);
     const branch = "taxonomy/define-" + slug(p.term);
 
+    let attrText;
+    if (attribution && (attribution.origin === "ai" || attribution.origin === "ai-edited")) {
+      const scope = attribution.scopePct == null ? "n/a" : `${attribution.scopePct}% AI`;
+      attrText = ` • Authorship: definition ${attribution.defPct}% AI / scope ${scope} / total ${attribution.totalHumanPct}% human`;
+    } else {
+      attrText = " • Authorship: 100% human-written";
+    }
+
     $("wiz-result-card").style.display = "block";
     $("wiz-result-meta").textContent =
-      `Action: ${exists ? "update existing" : "add new"} • Branch: ${branch} • Only ${DATA_FILE} is touched.`;
+      `Action: ${exists ? "update existing" : "add new"} • Branch: ${branch} • Only ${DATA_FILE} is touched.${attrText}`;
     $("wiz-run-cmd").textContent = "bash create-pr.sh";
     $("wiz-script-preview").textContent = script;
     $("wiz-entry-preview").textContent = entry;
     $("wiz-gh-upstream").textContent = REPO;
 
-    wireSubmit(p, exists, entry, script, branch);
+    wireSubmit(p, exists, entry, script, branch, attribution);
 
     banner("ok", `Ready for "${esc(p.term)}". Create the PR directly on GitHub (no token needed), or download <code>create-pr.sh</code> and run it locally.`);
     $("wiz-result-card").scrollIntoView({ behavior: "smooth" });
   }
 
   // ---------- submit: token-less GitHub web flow + script download ----------
-  function wireSubmit(p, exists, entry, script, branch) {
+  function wireSubmit(p, exists, entry, script, branch, attribution) {
     const repoName = REPO.split("/")[1];
     const fileDir = DATA_FILE.split("/").slice(0, -1).join("/");
     const subject = commitSubject(p, exists);
-    const description = prBody(p, exists);
+    const description = prBody(p, exists, attribution);
     const recBranch = branch;
     const ghBtn = $("wiz-gh-pr-btn");
 
@@ -562,7 +612,9 @@ echo "Done."
       if (user) {
         const forkRepo = `${user}/${repoName}`;
         const forkUrl = `https://github.com/${REPO}/fork`;
-        let forkExists = false;
+        // Tri-state detection: "yes" (confirmed fork), "no" (confirmed absent /
+        // 404), "unknown" (API error or rate limit — can't tell).
+        let forkState = "unknown";
         try {
           const r = await fetch(`https://api.github.com/repos/${forkRepo}`, {
             headers: { Accept: "application/vnd.github+json" },
@@ -572,20 +624,39 @@ echo "Done."
             const info = await r.json();
             const parent = info && info.parent && info.parent.full_name;
             const source = info && info.source && info.source.full_name;
-            forkExists = !!info.fork && ((parent && parent.toLowerCase() === REPO.toLowerCase()) || (source && source.toLowerCase() === REPO.toLowerCase()));
-            if (info && !info.fork) forkExists = false;
+            const isFork = !!info.fork && ((parent && parent.toLowerCase() === REPO.toLowerCase()) || (source && source.toLowerCase() === REPO.toLowerCase()));
+            if (isFork) {
+              forkState = "yes";
+            } else if (info && info.fork === false) {
+              // A repo with this name exists but is NOT a fork of upstream —
+              // committing there would target the wrong repo. Warn and stop.
+              banner("err", `<code>${esc(forkRepo)}</code> exists but is not a fork of <code>${esc(REPO)}</code>. Rename it or fork upstream first.`);
+              return;
+            } else {
+              forkState = "no";
+            }
+          } else if (r.status === 404) {
+            forkState = "no";
           }
-        } catch (e) { /* ignore */ }
-        if (!forkExists) {
+        } catch (e) { /* network/rate-limit → forkState stays "unknown" */ }
+
+        // Only send the user to the fork page when we're CERTAIN the fork is
+        // missing. If the fork exists (or we can't tell), go straight to the
+        // prefilled commit — GitHub routes an existing fork correctly.
+        if (forkState === "no") {
           window.open(forkUrl, "_blank", "noopener");
           banner("warn", `You don't appear to have a fork yet. Opened the <b>fork page</b> for <code>${esc(REPO)}</code> — click <b>Create fork</b>, then press the button again.`);
           return;
         }
+
         const full = await splicedFileFor(forkRepo);
         const prefill = buildPrefillUrl(forkRepo, full);
+        const forkNote = forkState === "unknown"
+          ? " (couldn't verify your fork via the API — if GitHub says the fork doesn't exist, create it and try again)"
+          : "";
         if (prefill) {
           window.open(prefill, "_blank", "noopener");
-          banner("ok", `Opened a <b>prefilled commit</b> on your fork <code>${esc(forkRepo)}</code>: file, commit title and description are filled in. ${branchNote} Then <b>Propose changes</b> to open the PR.`);
+          banner("ok", `Opened a <b>prefilled commit</b> on your fork <code>${esc(forkRepo)}</code>: file, commit title and description are filled in.${forkNote} ${branchNote} Then <b>Propose changes</b> to open the PR.`);
         } else {
           await pasteFallback(forkRepo, "the file is too large to prefill via URL");
         }
@@ -614,6 +685,270 @@ echo "Done."
       URL.revokeObjectURL(url);
     };
   }
+
+  // ---------- AI assist: any model exposed by the Puter SDK ----------
+  // Model-neutral: the dropdown lists EVERY model Puter returns, in the order
+  // Puter returns them. No single vendor/model (e.g. Grok) is privileged or
+  // defaulted — the first available model is simply the first in the list.
+  // The human always reviews and edits before generating a PR.
+  const AI = (function () {
+    // Minimal fallback list only used if the live model list can't be fetched.
+    const FALLBACK_MODELS = ["gpt-4o-mini"];
+    let available = false;
+    let models = [];
+    let selectedModel = null;
+    // Snapshot of the last AI-drafted payload, for authorship attribution.
+    let aiDraft = null;
+
+    function currentModel() {
+      const sel = $("wiz-ai-model");
+      return (sel && sel.value) || selectedModel || FALLBACK_MODELS[0];
+    }
+
+    // Flatten the various shapes Puter may return into a flat array of slugs.
+    function normalize(data) {
+      let out = [];
+      const push = (v) => {
+        if (typeof v === "string") out.push(v);
+        else if (v && v.id) out.push(v.id);
+        else if (v && v.name) out.push(v.name);
+      };
+      if (Array.isArray(data)) data.forEach(push);
+      else if (data && Array.isArray(data.models)) data.models.forEach(push);
+      else if (data && data.models && typeof data.models === "object")
+        Object.values(data.models).forEach((l) => (Array.isArray(l) ? l.forEach(push) : push(l)));
+      else if (data && typeof data === "object")
+        Object.values(data).forEach((v) => (Array.isArray(v) ? v.forEach(push) : push(v)));
+      return [...new Set(out.filter(Boolean))];
+    }
+
+    async function fetchModels() {
+      if (typeof puter !== "undefined" && puter.ai && typeof puter.ai.listModels === "function") {
+        try { const m = await puter.ai.listModels(); const n = normalize(m); if (n.length) return n; } catch (e) {}
+      }
+      for (const url of ["https://api.puter.com/puterai/chat/models", "https://api.puter.com/puterai/chat/models/"]) {
+        try { const r = await fetch(url, { headers: { "Content-Type": "application/json" } }); if (r.ok) { const n = normalize(await r.json()); if (n.length) return n; } } catch (e) {}
+      }
+      return [];
+    }
+
+    function populateSelect(list) {
+      const sel = $("wiz-ai-model");
+      if (!sel) return;
+      sel.innerHTML = "";
+      // Every model Puter exposes, in Puter's own order — no reordering, no
+      // Grok-first preference. Default to the first entry.
+      list.forEach((m) => {
+        const o = document.createElement("option");
+        o.value = m;
+        o.textContent = m;
+        sel.appendChild(o);
+      });
+      sel.value = list[0];
+      selectedModel = sel.value;
+      sel.addEventListener("change", () => { selectedModel = sel.value; check(); });
+    }
+
+    function setStatus(cls, text) {
+      const el = $("wiz-ai-status");
+      if (!el) return;
+      el.className = "wizard-ai-status " + cls;
+      el.textContent = text;
+    }
+
+    async function check() {
+      setStatus("checking", "Checking…");
+      try {
+        if (typeof puter === "undefined") {
+          await new Promise((r) => setTimeout(r, 600));
+          if (typeof puter === "undefined") throw new Error("Puter SDK not loaded");
+        }
+        await puter.ai.chat("ping", { model: currentModel() });
+        available = true;
+        setStatus("ready", "✓ AI ready");
+        const btn = $("wiz-ai-fill-btn");
+        if (btn) btn.disabled = false;
+      } catch (e) {
+        available = false;
+        setStatus("off", "✗ Unavailable");
+        const btn = $("wiz-ai-fill-btn");
+        if (btn) btn.disabled = true;
+      }
+    }
+
+    const PROMPT = (term) => {
+      const existing = STATE.terms.map((t) => t.term).filter((t) => t.toLowerCase() !== term.toLowerCase());
+      const termList = existing.length ? existing.join(", ") : "(none available)";
+      const wgList = WORKGROUPS.join(", ");
+      return `You are a careful terminology editor for the AAIF (Agentic AI Foundation) taxonomy.
+Given a single term, produce a vendor-neutral, standards-style entry.
+
+Term: ${JSON.stringify(term)}
+
+Existing taxonomy terms you may reference (choose ONLY from these, verbatim):
+${termList}
+
+Working groups you may choose from (choose ONLY from these, verbatim):
+${wgList}
+
+Rules:
+- "definition": exactly ONE sentence, concise and vendor-neutral. No trailing examples.
+- "scopeNote": optional clarifying context, examples or boundaries (may be empty string).
+- "aliases": array of common synonyms or alternate spellings (may be empty). Do NOT include any value that is itself an existing taxonomy term.
+- "relatedTerms": array of 0–4 CLOSELY related terms, each copied VERBATIM from the existing-terms list above. Never invent a term that isn't in that list. Empty array if none fit.
+- "contrastsWith": array of 0–3 terms that meaningfully CONTRAST with this one, each copied VERBATIM from the existing-terms list above. Never invent one. Empty array if none fit.
+- "workgroups": array of 0–3 working groups from the list above that would care about this term, copied VERBATIM. Empty array if unsure. Do NOT use "Universal".
+
+Return ONLY a JSON object with keys: definition, scopeNote, aliases, relatedTerms, contrastsWith, workgroups. No markdown, no commentary.`;
+    };
+
+    function parseJson(raw) {
+      let s = String(raw || "").trim();
+      s = s.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+      const first = s.indexOf("{"), last = s.lastIndexOf("}");
+      if (first >= 0 && last > first) s = s.slice(first, last + 1);
+      return JSON.parse(s);
+    }
+
+    async function fill() {
+      const btn = $("wiz-ai-fill-btn");
+      const term = $("wiz-term").value.trim();
+      if (!term) { banner("err", "Enter a term first, then let AI draft the fields."); return; }
+      if (!available) { banner("err", "AI (Puter) is not available right now."); return; }
+
+      const original = btn.textContent;
+      btn.disabled = true;
+      btn.textContent = "⏳ Drafting…";
+      try {
+        const res = await puter.ai.chat(PROMPT(term), { model: currentModel() });
+        const content = res && res.message ? res.message.content : res;
+        const obj = parseJson(content);
+
+        $("wiz-definition").value = String(obj.definition || "").trim();
+        $("wiz-scope").value = String(obj.scopeNote || "").trim();
+        const aliases = Array.isArray(obj.aliases) ? obj.aliases : [];
+        // fillTags routes through addTag, which already drops any alias that
+        // collides with an existing primary term (#78) — silently, so a draft
+        // doesn't spray errors.
+        fillTags("aliases", aliases.map((a) => String(a).trim()).filter(Boolean));
+
+        const skipped = [];
+        const applyValidated = (name, values) => {
+          const box = document.querySelector(`.wizard-tagbox[data-tags="${name}"]`);
+          box.querySelector(".wizard-tags").innerHTML = "";
+          (Array.isArray(values) ? values : []).forEach((v) => {
+            const val = String(v).trim();
+            if (!val) return;
+            const match = STATE.byName[val.toLowerCase()];
+            if (match && match.term.toLowerCase() !== term.toLowerCase()) addTag(box, match.term, false);
+            else skipped.push(val);
+          });
+        };
+        applyValidated("relatedTerms", obj.relatedTerms);
+        applyValidated("contrastsWith", obj.contrastsWith);
+
+        const wgWanted = new Set((Array.isArray(obj.workgroups) ? obj.workgroups : []).map((w) => String(w).trim().toLowerCase()));
+        document.querySelectorAll("#wiz-wg-list input").forEach((cb) => {
+          if (wgWanted.has(cb.value.toLowerCase())) cb.checked = true;
+        });
+
+        aiDraft = { payload: collectPayload(), model: currentModel() };
+
+        checkSentences();
+        updateTermBadge();
+        const extra = skipped.length
+          ? ` (skipped ${skipped.length} suggested term${skipped.length > 1 ? "s" : ""} not in the taxonomy: ${skipped.map(esc).join(", ")})`
+          : "";
+        banner("ok", `${esc(currentModel())} drafted an entry for "${esc(term)}" — definition, scope, aliases, related terms, contrasts and working groups.${extra} <b>Review and edit</b> before generating the PR.`);
+      } catch (e) {
+        banner("err", "AI draft failed" + (e && e.message ? ` (${esc(e.message)})` : "") + ". Try again, pick another model, or fill the fields manually.");
+      } finally {
+        btn.disabled = false;
+        btn.textContent = original;
+      }
+    }
+
+    // ---- authorship attribution ----
+    function levenshtein(a, b) {
+      a = a || ""; b = b || "";
+      if (a === b) return 0;
+      if (!a.length) return b.length;
+      if (!b.length) return a.length;
+      let prev = Array.from({ length: b.length + 1 }, (_, i) => i);
+      let cur = new Array(b.length + 1);
+      for (let i = 1; i <= a.length; i++) {
+        cur[0] = i;
+        for (let j = 1; j <= b.length; j++) {
+          const cost = a[i - 1] === b[j - 1] ? 0 : 1;
+          cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + cost);
+        }
+        [prev, cur] = [cur, prev];
+      }
+      return prev[b.length];
+    }
+    function setSimilarityPct(draftArr, finalArr) {
+      const norm = (a) => new Set((Array.isArray(a) ? a : []).map((v) => String(v).trim().toLowerCase()).filter(Boolean));
+      const d = norm(draftArr), f = norm(finalArr);
+      if (d.size === 0 && f.size === 0) return 100;
+      let inter = 0;
+      f.forEach((v) => { if (d.has(v)) inter++; });
+      const union = new Set([...d, ...f]).size || 1;
+      return Math.round((inter / union) * 100);
+    }
+    function textSimilarityPct(draft, final) {
+      draft = (draft || "").trim(); final = (final || "").trim();
+      if (!draft && !final) return 100;
+      if (draft === final) return 100;
+      const dist = levenshtein(draft, final);
+      const denom = Math.max(draft.length, final.length) || 1;
+      return Math.max(0, 100 - Math.round((dist / denom) * 100));
+    }
+
+    function attribution(final) {
+      if (aiDraft == null) {
+        return { origin: "manual", defPct: 0, scopePct: null, totalHumanPct: 100, model: null };
+      }
+      final = final || {};
+      const d = aiDraft.payload;
+      const textLen = (s) => (s || "").trim().length;
+      const setLen = (a) => (Array.isArray(a) ? a : []).filter((v) => String(v).trim()).length;
+
+      const fields = [
+        { kind: "text", draft: d.definition, final: final.definition, weight: textLen(final.definition) },
+        { kind: "text", draft: d.scopeNote, final: final.scopeNote, weight: textLen(final.scopeNote) },
+        { kind: "set", draft: d.aliases, final: final.aliases, weight: setLen(final.aliases) },
+        { kind: "set", draft: d.relatedTerms, final: final.relatedTerms, weight: setLen(final.relatedTerms) },
+        { kind: "set", draft: d.contrastsWith, final: final.contrastsWith, weight: setLen(final.contrastsWith) },
+        { kind: "set", draft: d.workgroups, final: final.workgroups, weight: setLen(final.workgroups) },
+      ];
+      let aiKept = 0, totalWeight = 0;
+      fields.forEach((f) => {
+        const sim = f.kind === "text" ? textSimilarityPct(f.draft, f.final) : setSimilarityPct(f.draft, f.final);
+        aiKept += f.weight * (sim / 100);
+        totalWeight += f.weight;
+      });
+      const defPct = textSimilarityPct(d.definition, final.definition);
+      const scopePct = textLen(final.scopeNote) === 0 && textLen(d.scopeNote) === 0 ? null : textSimilarityPct(d.scopeNote, final.scopeNote);
+      const totalAiPct = totalWeight ? Math.round((aiKept / totalWeight) * 100) : 100;
+      const totalHumanPct = Math.max(0, Math.min(100, 100 - totalAiPct));
+      const origin = totalHumanPct === 0 ? "ai" : "ai-edited";
+      return { origin, defPct, scopePct, totalHumanPct, model: aiDraft.model };
+    }
+
+    function resetBaseline() { aiDraft = null; }
+
+    async function init() {
+      const btn = $("wiz-ai-fill-btn");
+      if (btn) btn.addEventListener("click", fill);
+      setStatus("checking", "Loading models…");
+      models = await fetchModels();
+      if (!models.length) models = FALLBACK_MODELS.slice();
+      populateSelect(models);
+      check();
+    }
+
+    return { init, attribution, resetBaseline, get available() { return available; } };
+  })();
 
   // ---------- init ----------
   if (document.readyState === "loading") {
