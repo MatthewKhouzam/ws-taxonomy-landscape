@@ -586,7 +586,13 @@ echo "Done."
         description,
       });
       const url = `https://github.com/${ownerRepo}/new/${BASE_BRANCH}/${fileDir}?${params.toString()}`;
-      return url.length > 30000 ? null : url;
+      // GitHub's /new/ prefill only honors a `value` up to roughly 8 KB of URL.
+      // Above that it OPENS the editor but silently drops the file content,
+      // producing a broken/empty commit (the "create a PR breaks" symptom).
+      // The old 30000 cap let a ~26 KB URL through, so prefill always failed
+      // for the current data file. Cap conservatively and fall back to the
+      // reliable clipboard-paste flow when the file is too large.
+      return url.length > 8000 ? null : url;
     }
 
     async function pasteFallback(ownerRepo, note) {
@@ -746,16 +752,111 @@ echo "Done."
       });
       sel.value = list[0];
       selectedModel = sel.value;
-      sel.addEventListener("change", () => { selectedModel = sel.value; check(); });
+      // Changing the model must NOT trigger a probe — probing costs a real
+      // Puter query and the daily quota is tiny (≈25/day). Just update the
+      // tooltip to reflect the newly selected model.
+      sel.addEventListener("change", () => {
+        selectedModel = sel.value;
+        if (available) setStatus("ready", "✓ AI ready", "Using model: " + currentModel());
+      });
     }
 
-    function setStatus(cls, text) {
+    // text = short label shown inline; detail = full reason shown on hover.
+    function setStatus(cls, text, detail) {
       const el = $("wiz-ai-status");
       if (!el) return;
       el.className = "wizard-ai-status " + cls;
       el.textContent = text;
+      if (detail) el.title = detail;
+      else el.removeAttribute("title");
     }
 
+    // Turn a thrown error into a short status label + a longer tooltip detail,
+    // so the UI explains *why* AI is unavailable instead of a generic "✗".
+    function classifyError(e) {
+      // Puter rejects with structured shapes like
+      //   { error: { code: "auth_canceled", message: "Authentication canceled" } }
+      // which have no top-level .message — so dig out code + message from the
+      // nested object before falling back to a string-ified error.
+      const inner = e && typeof e === "object" ? (e.error || e) : null;
+      const code = (inner && (inner.code || inner.name)) || "";
+      const innerMsg = (inner && inner.message) || "";
+      let raw = innerMsg || code || (e && e.message) || "";
+      if (!raw) {
+        try { raw = typeof e === "string" ? e : JSON.stringify(e); } catch (_) { raw = String(e); }
+      }
+      const msg = String(raw);
+      const low = (String(code) + " " + msg).toLowerCase();
+
+      // SDK script never loaded (CDN blocked, offline, CSP, ad-blocker, file://).
+      if (low.includes("sdk not loaded")) {
+        return {
+          label: "✗ SDK blocked",
+          detail: "The Puter SDK (js.puter.com/v2/) did not load. Likely offline, blocked by an ad/script blocker or CSP, or the CDN is unreachable.",
+        };
+      }
+      // User dismissed / canceled the Puter sign-in popup.
+      if (low.includes("auth_canceled") || low.includes("cancel")) {
+        return {
+          label: "✗ Sign-in canceled",
+          detail: "You canceled the Puter sign-in. Click \u2728 Fill with AI again and complete the sign-in popup to use AI. (" + msg + ")",
+        };
+      }
+      // Popup blocked by the browser.
+      if (low.includes("popup") || low.includes("blocked")) {
+        return {
+          label: "✗ Popup blocked",
+          detail: "The browser blocked Puter's sign-in popup. Allow popups for this page, then click Fill with AI again. (" + msg + ")",
+        };
+      }
+      // Not signed in / unauthorized.
+      if (low.includes("auth") || low.includes("sign in") || low.includes("signin") ||
+          low.includes("login") || low.includes("unauthor") || low.includes("401") ||
+          low.includes("403") || low.includes("permission")) {
+        return {
+          label: "✗ Sign-in required",
+          detail: "Puter needs you to sign in before using AI. Click Fill with AI and complete the popup. (" + msg + ")",
+        };
+      }
+      // Rate limited / quota (Puter free tier is ~25 queries/day).
+      if (low.includes("rate") || low.includes("quota") || low.includes("429") ||
+          low.includes("too many") || low.includes("limit")) {
+        return {
+          label: "✗ Rate limited",
+          detail: "Puter is rate-limiting or you've hit the daily usage quota (~25 queries/day on the free tier). Wait and retry later. (" + msg + ")",
+        };
+      }
+      // Model-specific failure.
+      if (low.includes("model") || low.includes("not found") || low.includes("404")) {
+        return {
+          label: "✗ Model error",
+          detail: "The selected model isn't serviceable right now. Pick another model from the dropdown. (" + msg + ")",
+        };
+      }
+      // Network / CORS / server-side failure.
+      if (low.includes("fetch") || low.includes("network") || low.includes("cors") ||
+          low.includes("failed to fetch") || low.includes("timeout") ||
+          low.includes("500") || low.includes("502") || low.includes("503")) {
+        return {
+          label: "✗ Network error",
+          detail: "Could not reach Puter's AI backend (network/CORS/server error). Check your connection and retry. (" + msg + ")",
+        };
+      }
+      return {
+        label: "✗ Unavailable",
+        detail: "AI is unavailable: " + (msg || "unknown error") + ". See the browser console for details.",
+      };
+    }
+
+    // Readiness check that costs ZERO Puter queries.
+    //
+    // The old implementation fired a real `puter.ai.chat("ping", …)` on every
+    // page load (and again on every model change). Puter's free tier allows
+    // only ~25 queries/day, so those probes silently drained the quota — and
+    // once exhausted, the probe itself failed, leaving the button permanently
+    // disabled with a generic "Unavailable". We now treat AI as available if
+    // the SDK object is present and exposes puter.ai.chat, and we only make a
+    // real request when the user explicitly clicks "Fill with AI".
     async function check() {
       setStatus("checking", "Checking…");
       try {
@@ -763,14 +864,21 @@ echo "Done."
           await new Promise((r) => setTimeout(r, 600));
           if (typeof puter === "undefined") throw new Error("Puter SDK not loaded");
         }
-        await puter.ai.chat("ping", { model: currentModel() });
+        if (!puter.ai || typeof puter.ai.chat !== "function") {
+          throw new Error("Puter AI chat API not available");
+        }
+        // SDK is loaded and the chat API exists — ready. No query spent here.
+        // (Auth/quota/model errors, if any, surface when the user clicks Fill.)
         available = true;
-        setStatus("ready", "✓ AI ready");
+        setStatus("ready", "✓ AI ready", "Using model: " + currentModel() + " — no query is spent until you click Fill with AI.");
         const btn = $("wiz-ai-fill-btn");
         if (btn) btn.disabled = false;
       } catch (e) {
         available = false;
-        setStatus("off", "✗ Unavailable");
+        const info = classifyError(e);
+        // Full reason to the console for debugging; short label + tooltip in UI.
+        try { console.warn("[wizard AI] unavailable:", info.label, "-", info.detail, e); } catch (_) {}
+        setStatus("off", info.label, info.detail);
         const btn = $("wiz-ai-fill-btn");
         if (btn) btn.disabled = true;
       }
@@ -814,12 +922,36 @@ Return ONLY a JSON object with keys: definition, scopeNote, aliases, relatedTerm
       const btn = $("wiz-ai-fill-btn");
       const term = $("wiz-term").value.trim();
       if (!term) { banner("err", "Enter a term first, then let AI draft the fields."); return; }
-      if (!available) { banner("err", "AI (Puter) is not available right now."); return; }
+      if (!available) {
+        const statusEl = $("wiz-ai-status");
+        const reason = statusEl && statusEl.title ? ` ${statusEl.title}` : "";
+        banner("err", `AI (Puter) is not available right now.${esc(reason)}`);
+        return;
+      }
 
       const original = btn.textContent;
       btn.disabled = true;
       btn.textContent = "⏳ Drafting…";
+
+      // IMPORTANT: Puter only opens its sign-in popup while the browser's
+      // user-activation is still "active" (i.e. synchronously inside the click
+      // handler, before any awaited microtask). If we await other work first,
+      // the activation is consumed and Puter rejects with "auth_canceled"
+      // WITHOUT ever showing a popup. So, still inside this gesture, kick off
+      // sign-in FIRST (do not await anything before this), then await it.
+      let signInPromise = null;
       try {
+        const signedIn =
+          (puter.auth && typeof puter.auth.isSignedIn === "function" && puter.auth.isSignedIn()) ||
+          (typeof puter.isSignedIn === "function" && puter.isSignedIn());
+        if (!signedIn && puter.auth && typeof puter.auth.signIn === "function") {
+          // Synchronous call inside the gesture — this opens the popup.
+          signInPromise = puter.auth.signIn();
+        }
+      } catch (_) { /* fall through; chat() will trigger auth if needed */ }
+
+      try {
+        if (signInPromise) await signInPromise;
         const res = await puter.ai.chat(PROMPT(term), { model: currentModel() });
         const content = res && res.message ? res.message.content : res;
         const obj = parseJson(content);
@@ -861,7 +993,9 @@ Return ONLY a JSON object with keys: definition, scopeNote, aliases, relatedTerm
           : "";
         banner("ok", `${esc(currentModel())} drafted an entry for "${esc(term)}" — definition, scope, aliases, related terms, contrasts and working groups.${extra} <b>Review and edit</b> before generating the PR.`);
       } catch (e) {
-        banner("err", "AI draft failed" + (e && e.message ? ` (${esc(e.message)})` : "") + ". Try again, pick another model, or fill the fields manually.");
+        const info = classifyError(e);
+        try { console.warn("[wizard AI] fill failed:", info.label, "-", info.detail, e); } catch (_) {}
+        banner("err", `${esc(info.label.replace(/^\u2717\s*/, ""))}: ${esc(info.detail)} Try again, pick another model, or fill the fields manually.`);
       } finally {
         btn.disabled = false;
         btn.textContent = original;
